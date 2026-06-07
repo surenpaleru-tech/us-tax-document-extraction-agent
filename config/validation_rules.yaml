@@ -1,0 +1,17 @@
+required_fields:
+
+  - tax_year
+
+numeric_fields:
+
+  - ordinary_business_income
+
+  - rental_income
+
+  - interest_income
+
+  - dividend_income
+
+  - short_term_capital_gain
+
+  - long_term_capital_gain

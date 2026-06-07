@@ -1,0 +1,33 @@
+chunking:
+
+  enabled: true
+
+  chunk_size: 2500
+
+models:
+
+  text_model: qwen3.5:4b
+
+  vision_model: gemma3:27b
+
+llm:
+
+  temperature: 0
+
+  context_window: 8192
+
+extraction:
+
+  max_pages: 100
+
+  extract_taxpayer: true
+
+  extract_organization: true
+
+  extract_financial: true
+
+  extract_tax_boxes: true
+
+  extract_state_information: true
+
+  extract_foreign_information: true

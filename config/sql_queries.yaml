@@ -1,0 +1,70 @@
+create_tax_documents_table: |
+  CREATE TABLE IF NOT EXISTS tax_documents
+  (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+      file_name TEXT,
+
+      document_type TEXT,
+
+      tax_year TEXT,
+
+      filing_entity TEXT,
+
+      ein TEXT,
+
+      confidence_score REAL,
+
+      validation_error_count INTEGER,
+
+      requires_review INTEGER,
+
+      json_payload TEXT,
+
+      validation_errors TEXT,
+
+      processing_time_seconds REAL,
+
+      created_date TEXT
+  )
+
+insert_tax_document: |
+  INSERT INTO tax_documents
+  (
+      file_name,
+      document_type,
+      tax_year,
+      filing_entity,
+      ein,
+      confidence_score,
+      validation_error_count,
+      requires_review,
+      json_payload,
+      validation_errors,
+      processing_time_seconds,
+      created_date
+  )
+  VALUES
+  (
+      ?,?,?,?,?,?,?,?,?,?,?,?
+  )
+
+select_all_documents: |
+  SELECT *
+  FROM tax_documents
+  ORDER BY id DESC
+
+select_document_by_id: |
+  SELECT *
+  FROM tax_documents
+  WHERE id = ?
+
+select_review_documents: |
+  SELECT *
+  FROM tax_documents
+  WHERE requires_review = 1
+  ORDER BY id DESC
+
+select_document_count: |
+  SELECT COUNT(*)
+  FROM tax_documents

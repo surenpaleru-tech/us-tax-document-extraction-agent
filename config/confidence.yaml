@@ -1,0 +1,15 @@
+base_score: 100
+
+validation_error_penalty: 10
+
+empty_field_penalty: 2
+
+required_fields:
+
+  - document_type
+
+  - tax_year
+
+  - ein
+
+human_review_threshold: 85

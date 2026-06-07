@@ -1,0 +1,6 @@
+input_folder: data/input
+output_folder: data/output
+supported_extensions:
+  - pdf
+recursive: true
+max_workers: 4

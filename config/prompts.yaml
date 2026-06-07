@@ -1,0 +1,35 @@
+classification_prompt: |
+
+  You are a tax form classification expert.
+
+  Determine document type.
+
+  Possible values:
+
+  K1
+  K2
+  K3
+  W2
+  1099
+
+  Return ONLY category name.
+
+extraction_prompt: |
+
+  Extract all identifiable tax fields.
+
+  Rules:
+
+  - Do not invent values
+  - Missing values must be null
+  - Preserve numerical precision
+
+validation_prompt: |
+
+  Validate extracted values.
+
+  Check:
+
+  - Missing values
+  - Invalid formats
+  - Numerical inconsistencies

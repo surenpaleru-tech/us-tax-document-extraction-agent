@@ -1,0 +1,27 @@
+application_name: Tax Document Intelligence Platform
+
+environment: local
+
+output:
+
+  excel_file: output/extracted_tax_documents.xlsx
+
+  review_folder: output/review
+
+  audit_folder: output/audit
+
+logging:
+
+  level: INFO
+
+database:
+
+  enabled: true
+
+human_review:
+
+  enabled: true
+
+batch_processing:
+
+  enabled: true

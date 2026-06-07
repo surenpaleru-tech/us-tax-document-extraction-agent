@@ -1,0 +1,6 @@
+database_path: data/tax_documents.db
+
+tables:
+
+  tax_documents:
+    enabled: true
