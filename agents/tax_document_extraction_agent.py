@@ -125,6 +125,33 @@ Document content:
             "metadata": {"source": "vision_fallback", "extraction_notes": ["Vision model failed for this page."]},
         }
 
+    _easyocr_reader = None
+
+    @classmethod
+    def get_ocr_reader(cls):
+        if cls._easyocr_reader is None:
+            import easyocr
+            # EasyOCR downloads models on demand.
+            cls._easyocr_reader = easyocr.Reader(['en'])
+        return cls._easyocr_reader
+
     def extract_from_images(self, image_paths: List[str]) -> Dict[str, Any]:
+        logger.info("Extracting text from scanned images via EasyOCR")
+        try:
+            reader = self.get_ocr_reader()
+            texts = []
+            for path in image_paths:
+                result = reader.readtext(path, detail=0)
+                texts.append(" ".join(result))
+            full_text = "\n\n--- Page Separation ---\n\n".join(texts)
+            logger.info(f"OCR completed. Extracted {len(full_text)} characters.")
+            if full_text.strip():
+                return self.extract_from_text(full_text)
+        except Exception as e:
+            logger.error(f"OCR extraction failed: {e}")
+
+        # Fallback to LLM vision if OCR fails
+        logger.warning("Falling back to LLM Vision extraction")
         page_results = [self.extract_image(image_path) for image_path in image_paths]
         return ResultMerger.merge(page_results)
+
