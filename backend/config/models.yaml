@@ -3,7 +3,7 @@
 active_provider: ollama
 providers:
   ollama:
-    base_url: http://localhost:11434
+    base_url: http://127.0.0.1:11434
     text_model: qwen3.5:4b
     vision_model: gemma4:e4b
   openai:

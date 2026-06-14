@@ -29,7 +29,7 @@ class LLMService:
         provider_config = providers.get(self.provider, {})
         model_key = "vision_model" if vision else "text_model"
         self.model = model or model_name or os.getenv("LLM_MODEL") or provider_config.get(model_key) or "qwen3.5:4b"
-        self.base_url = provider_config.get("base_url", "http://localhost:11434").rstrip("/")
+        self.base_url = provider_config.get("base_url", "http://127.0.0.1:11434").rstrip("/")
         self.timeout = int(config.get("timeout_seconds", 120))
         self.temperature = kwargs.get("temperature", config.get("temperature", 0))
         self.max_tokens = kwargs.get("max_tokens", config.get("max_tokens", 4096))
@@ -147,5 +147,85 @@ class LLMService:
             for part in candidate.get("content", {}).get("parts", [])
         )
 
-    def chat(self, prompt: str) -> str:
-        return self.invoke(prompt)
+    def chat(self, messages: Any) -> str:
+        if isinstance(messages, str):
+            return self.invoke(messages)
+        if self.provider == "openai":
+            return self._chat_openai(messages)
+        if self.provider == "google":
+            return self._chat_google(messages)
+        return self._chat_ollama(messages)
+
+    def _chat_ollama(self, messages: list[dict]) -> str:
+        response = requests.post(
+            f"{self.base_url}/api/chat",
+            json={
+                "model": self.model,
+                "messages": messages,
+                "stream": False,
+                "options": {
+                    "temperature": self.temperature,
+                    "num_predict": min(self.max_tokens, 2048),
+                },
+            },
+            timeout=self.timeout,
+        )
+        if not response.ok:
+            raise RuntimeError(f"Ollama {response.status_code}: {response.text[:1000]}")
+        return response.json().get("message", {}).get("content", "")
+
+    def _chat_openai(self, messages: list[dict]) -> str:
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise RuntimeError("OPENAI_API_KEY is required for the OpenAI provider")
+        response = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={
+                "model": self.model,
+                "messages": messages,
+                "temperature": self.temperature,
+                "max_tokens": min(self.max_tokens, 2048),
+            },
+            timeout=self.timeout,
+        )
+        if not response.ok:
+            raise RuntimeError(f"OpenAI {response.status_code}: {response.text[:1000]}")
+        return response.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+
+    def _chat_google(self, messages: list[dict]) -> str:
+        api_key = os.getenv("GOOGLE_API_KEY")
+        if not api_key:
+            raise RuntimeError("GOOGLE_API_KEY is required for the Google provider")
+        contents = []
+        system_instruction = None
+        for msg in messages:
+            role = msg.get("role")
+            content = msg.get("content")
+            if role == "system":
+                system_instruction = {"parts": [{"text": content}]}
+            else:
+                gemini_role = "user" if role == "user" else "model"
+                contents.append({"role": gemini_role, "parts": [{"text": content}]})
+        payload = {
+            "contents": contents,
+            "generationConfig": {
+                "temperature": self.temperature,
+                "maxOutputTokens": min(self.max_tokens, 2048)
+            }
+        }
+        if system_instruction:
+            payload["systemInstruction"] = system_instruction
+        response = requests.post(
+            f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={api_key}",
+            json=payload,
+            timeout=self.timeout,
+        )
+        if not response.ok:
+            raise RuntimeError(f"Google {response.status_code}: {response.text[:1000]}")
+        data = response.json()
+        return "".join(
+            part.get("text", "")
+            for candidate in data.get("candidates", [])
+            for part in candidate.get("content", {}).get("parts", [])
+        )

@@ -10,6 +10,7 @@ import yaml
 from fastapi import BackgroundTasks, Body, FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from agents.human_review_agent import HumanReviewAgent
 from services.config_loader import ConfigLoader
@@ -305,7 +306,7 @@ async def update_model_config(payload: Dict[str, Any] = Body(...)) -> Dict[str, 
     config["providers"][provider]["vision_model"] = vision_model
 
     if provider == "ollama":
-        base_url = str(payload.get("base_url") or config["providers"][provider].get("base_url") or "http://localhost:11434").strip()
+        base_url = str(payload.get("base_url") or config["providers"][provider].get("base_url") or "http://127.0.0.1:11434").strip()
         config["providers"][provider]["base_url"] = base_url
 
     if "temperature" in payload:
@@ -461,3 +462,144 @@ async def export_json() -> FileResponse:
     export_path.parent.mkdir(parents=True, exist_ok=True)
     export_path.write_text(json.dumps(rows, indent=2, ensure_ascii=False), encoding="utf-8")
     return FileResponse(export_path, filename="tax_documents_export.json")
+
+
+@app.post("/api/chat")
+def chat_sql(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    message = payload.get("message", "").strip()
+    if not message:
+        raise HTTPException(status_code=400, detail="Message is required")
+    history = payload.get("history", [])
+
+    # Get SQLite inventory
+    db_rows = DATABASE_SERVICE.get_all_documents()
+    db_inventory = []
+    
+    # Extract keywords from the user message for database searching
+    import re
+    keywords = [kw.lower() for kw in re.findall(r"\w+", message) if len(kw) > 2]
+    
+    matched_docs = []
+    
+    for r in db_rows:
+        doc_info = {
+            "id": r[0],
+            "file_name": r[1],
+            "document_type": r[2] or "Unknown",
+            "tax_year": r[3] or "Unknown",
+            "filing_entity": r[4] or "Unknown",
+            "ein": r[5] or "Unknown",
+            "confidence_score": r[6] or 0,
+            "requires_review": bool(r[8]),
+            "json_payload": r[9],
+        }
+        db_inventory.append(doc_info)
+        
+        # Determine relevance by matching keywords in file metadata or payload content
+        haystack = f"{r[1]} {r[2]} {r[3]} {r[4]} {r[5]} {r[9]}".lower()
+        if not keywords or any(kw in haystack for kw in keywords):
+            matched_docs.append(doc_info)
+
+    # Format database inventory list
+    inventory_str = "\n".join([
+        f"- ID {doc['id']}: {doc['file_name']} (Type: {doc['document_type']}, Year: {doc['tax_year']}, Entity: {doc['filing_entity']}, EIN: {doc['ein']}, Requires Review: {doc['requires_review']})"
+        for doc in db_inventory
+    ])
+    if not inventory_str:
+        inventory_str = "No documents currently exist in the database."
+
+    # Format structured context from matching JSON payloads
+    # Limit context to top 3 matching documents to keep prompt sizes compact
+    context_str = ""
+    for doc in matched_docs[:3]:
+        try:
+            payload_dict = json.loads(doc["json_payload"]) if isinstance(doc["json_payload"], str) else doc["json_payload"]
+            payload_dict.pop("metadata", None) # Remove metadata block to save tokens
+            pretty_json = json.dumps(payload_dict, indent=2, ensure_ascii=False)
+        except Exception:
+            pretty_json = str(doc["json_payload"])
+            
+        context_str += f"--- START OF DOCUMENT RECORD: {doc['file_name']} ---\n"
+        context_str += f"Filename: {doc['file_name']}\n"
+        context_str += f"Type: {doc['document_type']}\n"
+        context_str += f"Tax Year: {doc['tax_year']}\n"
+        context_str += f"Filing Entity / Taxpayer: {doc['filing_entity']}\n"
+        context_str += f"EIN: {doc['ein']}\n"
+        context_str += f"Extracted Structured JSON Payload:\n{pretty_json}\n"
+        context_str += f"--- END OF DOCUMENT RECORD ---\n\n"
+
+    if not context_str:
+        context_str = "No specific matching document records found for the keywords in your query."
+
+    # Build prompt
+    system_prompt = f"""You are a helpful, enterprise-grade Tax Intelligence Assistant.
+You have direct read access to the SQL database inventory of processed tax documents and their full extracted structured JSON data.
+
+Here is the current database inventory:
+{inventory_str}
+
+Here is the relevant structured JSON context from the matching database records:
+{context_str}
+
+Instructions:
+1. Use the database inventory to answer general questions about what files exist, how many documents are indexed, filing entities, or EINs.
+2. Use the structured JSON context to answer specific questions about the values, financial figures, boxes, state/foreign details, or taxpayer details.
+3. Be precise and base your answers on the provided context. If the information is not in the context, say you do not know.
+4. When mentioning document details, cite the filename.
+5. Answer in a professional, concise tone.
+"""
+
+    # Build prompt messages list for structured chat
+    messages_list = [{"role": "system", "content": system_prompt}]
+    if history:
+        for msg in history:
+            role = "user" if msg.get("role") == "user" else "assistant"
+            messages_list.append({"role": role, "content": msg.get("content")})
+    messages_list.append({"role": "user", "content": message})
+
+    # Call LLM using structured chat
+    try:
+        llm = LLMService(vision=False)
+        response_text = llm.chat(messages_list)
+    except Exception as e:
+        logger.error(f"LLM chat failed: {e}")
+        response_text = f"I encountered an error while communicating with the AI model: {e}"
+
+    # Return matched documents as sources for the frontend
+    sources = []
+    for doc in matched_docs[:3]:
+        sources.append({
+            "id": f"sql_doc_{doc['id']}",
+            "text": f"Filing Entity: {doc['filing_entity']}\nEIN: {doc['ein']}\nTax Year: {doc['tax_year']}\nRequires Review: {doc['requires_review']}",
+            "metadata": {
+                "file_name": doc["file_name"],
+                "document_type": doc["document_type"],
+                "tax_year": doc["tax_year"],
+                "filing_entity": doc["filing_entity"],
+                "ein": doc["ein"]
+            }
+        })
+
+    # Return simple inventory objects (without raw json payload to keep traffic compact)
+    simplified_inventory = []
+    for doc in db_inventory:
+        simplified_inventory.append({
+            "id": doc["id"],
+            "file_name": doc["file_name"],
+            "document_type": doc["document_type"],
+            "tax_year": doc["tax_year"],
+            "filing_entity": doc["filing_entity"],
+            "ein": doc["ein"],
+            "requires_review": doc["requires_review"]
+        })
+
+    return {
+        "response": response_text,
+        "sources": sources,
+        "inventory": simplified_inventory
+    }
+
+
+FRONTEND_DIST = BASE_DIR / "frontend" / "dist"
+if FRONTEND_DIST.exists():
+    app.mount("/", StaticFiles(directory=FRONTEND_DIST, html=True), name="frontend")

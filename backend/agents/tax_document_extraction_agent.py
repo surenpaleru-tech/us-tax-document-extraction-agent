@@ -96,7 +96,7 @@ Document content:
         return self._regex_fallback(chunk)
 
     def extract_from_text(self, document_text: str) -> Dict[str, Any]:
-        chunks = DocumentChunker.split_text(document_text, chunk_size=3500) or [document_text]
+        chunks = DocumentChunker.split_text(document_text) or [document_text]
         results: List[Dict[str, Any]] = [self.extract_chunk(chunk) for chunk in chunks if chunk.strip()]
         merged = ResultMerger.merge(results) if results else {}
         return merged or self._regex_fallback(document_text)
